@@ -34,7 +34,20 @@
     <span>Archivos</span>
     <form id="newFileForm"><input id="newFileName" placeholder="nuevo.html"><button class="btn small">＋</button></form>
   </div>
+  <div class="upload-row">
+    <input type="file" id="fileUpload" title="audio/video/imagen…">
+    <button id="btnUpload" class="btn small">⬆ Subir</button>
+  </div>
   <ul id="fileList"></ul>
+  <details id="audioPanel">
+    <summary>🎵 Audio del video</summary>
+    <div id="audioRows"></div>
+    <div class="audio-foot">
+      <button id="btnAudioAdd" class="btn small">＋ pista</button>
+      <button id="btnAudioSave" class="btn primary small">💾 Guardar audio</button>
+      <span id="audioStatus"></span>
+    </div>
+  </details>
   <textarea id="fileContent" spellcheck="false" placeholder="selecciona un archivo…"></textarea>
   <div class="ed-foot">
     <span id="fileStatus"></span>

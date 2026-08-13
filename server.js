@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 const archiver = require('archiver');
 const puppeteer = require('puppeteer-core');
 
@@ -189,6 +189,35 @@ app.post('/api/projects/:name/file', (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+/* upload binario (audio/video/imágenes): body crudo con content-type propio */
+app.post('/api/projects/:name/upload', (req, res) => {
+  try {
+    const dir = projectDir(req.params.name);
+    const p = safeResolve(dir, req.query.path);
+    if (fs.existsSync(p)) return res.status(409).json({ ok: false, error: 'ya existe' });
+    const chunks = [];
+    let size = 0;
+    const MAX = 100 * 1024 * 1024;
+    let done = false;
+    req.on('data', c => {
+      if (done) return;
+      size += c.length;
+      if (size > MAX) { done = true; req.destroy(new Error('archivo muy grande')); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (done) return;
+      done = true;
+      try {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, Buffer.concat(chunks));
+        res.json({ ok: true, size });
+      } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+    });
+    req.on('error', () => { if (!done) { done = true; res.status(400).json({ ok: false, error: 'upload falló' }); } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 /* ---------------- API: captura PNG (chrome headless) ---------------- */
 
 app.post('/api/projects/:name/capture', (req, res) => {
@@ -276,6 +305,9 @@ app.post('/api/projects/:name/record/start', async (req, res) => {
     const page = await browser.newPage();
     await page.setViewport({ width: meta.width, height: meta.height, deviceScaleFactor: 1 });
     await page.goto(url, { waitUntil: 'load', timeout: 30000 });
+    // ⏳ video embebido: forzar descarga completa ANTES de grabar (para que corra fluido)
+    let prepared = { videos: 0, buffered: true };
+    try { prepared = await ensureVideosBuffered(page, 45000); } catch (e) { console.error('[rec] preload video:', e.message); }
     await new Promise(r => setTimeout(r, 600));
     const client = await page.createCDPSession();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-rec-'));
@@ -285,12 +317,14 @@ app.post('/api/projects/:name/record/start', async (req, res) => {
     rec.project = req.params.name; rec.startedAt = Date.now();
     rec.seq = 0; rec.times = []; rec.lastTs = 0;
     // screencast: frames solo cuando hay movimiento (el compositor está sucio)
-    client.on('Page.screencastFrame', ({ data, sessionId: fId, metadata }) => {
+    // ⚠️ ts SIEMPRE en wall-clock (Date.now/1000) para mezclar con el heartbeat
+    client.on('Page.screencastFrame', ({ data, sessionId: fId }) => {
       if (!rec.active) return;
       const seq = rec.seq++;
       try { fs.writeFileSync(path.join(tmpDir, `f${seq}.jpg`), Buffer.from(data, 'base64')); } catch {}
-      rec.times.push({ seq, ts: metadata.timestamp });
-      rec.lastTs = metadata.timestamp;
+      const ts = Date.now() / 1000;
+      rec.times.push({ seq, ts });
+      rec.lastTs = ts;
       client.send('Page.screencastFrameAck', { sessionId: fId }).catch(() => {});
     });
     client.send('Page.startScreencast', { format: 'jpeg', quality: 85 }).catch(e => console.error('[rec] screencast:', e.message));
@@ -309,7 +343,7 @@ app.post('/api/projects/:name/record/start', async (req, res) => {
       } catch (e) { /* noop */ }
     }, 1000);
     rec.stopTimer = setTimeout(() => { stopRecording(rec.sessionId, true).catch(() => {}); }, rec.maxMs);
-    res.json({ ok: true, sessionId: rec.sessionId, width: meta.width, height: meta.height });
+    res.json({ ok: true, sessionId: rec.sessionId, width: meta.width, height: meta.height, prepared });
   } catch (e) {
     if (rec.browser) rec.browser.close().catch(() => {});
     recReset();
@@ -337,6 +371,100 @@ app.post('/api/projects/:name/record/key', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+/* ---------------- grabación: preload de videos embebidos ----------------
+ * Si el proyecto tiene <video>, se fuerza la descarga completa ANTES de
+ * empezar a grabar (seek al final y regreso) → corre fluido durante la
+ * captura, sin stutter por red.
+ */
+
+async function ensureVideosBuffered(page, timeoutMs) {
+  const hasVideos = await page.evaluate(() => document.querySelectorAll('video').length > 0);
+  if (!hasVideos) return { videos: 0, buffered: true };
+  return Promise.race([
+    page.evaluate(async () => {
+      const vs = [...document.querySelectorAll('video')];
+      for (const v of vs) {
+        if (v.preload === 'none') v.preload = 'auto';
+        if (v.readyState < 1) { try { v.load(); } catch {} }
+      }
+      // esperar metadata de todos
+      await Promise.all(vs.map(v => v.readyState >= 1 ? Promise.resolve() : new Promise(r => {
+        const h = () => r();
+        v.addEventListener('loadedmetadata', h, { once: true });
+        setTimeout(() => r(), 8000);
+      })));
+      // forzar buffer completo: seek al final y volver a la posición original
+      for (const v of vs) {
+        const orig = v.currentTime;
+        try {
+          const bufferedOk = v.buffered.length && Number.isFinite(v.duration) && v.duration > 0 && v.buffered.end(v.buffered.length - 1) >= v.duration - 0.3;
+          if (!bufferedOk && Number.isFinite(v.duration) && v.duration > 0) {
+            v.currentTime = Math.max(0, v.duration - 0.05);
+            await new Promise(r => { v.addEventListener('seeked', r, { once: true }); setTimeout(() => r(), 4000); });
+          }
+        } catch {}
+        try { if (Math.abs(v.currentTime - orig) > 0.5) v.currentTime = orig; } catch {}
+      }
+      const buffered = vs.every(v => v.readyState === 4 || (v.buffered.length && Number.isFinite(v.duration) && v.buffered.end(v.buffered.length - 1) >= v.duration - 0.3));
+      return { videos: vs.length, buffered, durations: vs.map(v => Number.isFinite(v.duration) ? Math.round(v.duration) : null) };
+    }),
+    new Promise(r => setTimeout(() => r({ videos: -1, buffered: false, timeout: true }), timeoutMs))
+  ]);
+}
+
+/* ---------------- grabación: mux de pistas de audio ----------------
+ * project.json puede declarar: "audio": [{file, at, volume, fadeIn, fadeOut}]
+ * Al codificar el video, se mezclan las pistas con adelay/amix/loudnorm
+ * (estilo del pipeline: I=-13.5, TP=-0.3). Determinista, sin audio del SO.
+ */
+
+function probeDur(file) {
+  try {
+    const r = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { encoding: 'utf8', timeout: 15000 });
+    const d = parseFloat(r.trim());
+    return Number.isFinite(d) ? d : null;
+  } catch { return null; }
+}
+
+async function muxAudio(videoFile, tracks, dir) {
+  const videoDur = await probeDur(videoFile);
+  if (!videoDur) return null;
+  const out = path.join(path.dirname(videoFile), path.basename(videoFile, '.mp4') + '-audio.mp4');
+  const inputs = ['-y', '-i', videoFile];
+  const filters = [];
+  const labels = [];
+  let valid = 0;
+  for (const t of tracks) {
+    const file = path.join(dir, t.file);
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) { console.warn('[rec] pista de audio no existe:', t.file); continue; }
+    const n = valid + 1;
+    inputs.push('-i', file);
+    let f = `[${n}:a]aresample=48000`;
+    const vol = Number(t.volume ?? 1);
+    if (vol !== 1) f += `,volume=${vol}`;
+    const at = Math.max(0, Number(t.at) || 0);
+    if (at > 0) f += `,adelay=${Math.round(at * 1000)}:all=1`;
+    const fi = Math.max(0, Number(t.fadeIn) || 0);
+    if (fi > 0) f += `,afade=t=in:st=0:d=${fi}`;
+    const fo = Math.max(0, Number(t.fadeOut) || 0);
+    if (fo > 0) {
+      const td = await probeDur(file);
+      const st = td ? Math.max(0, td - fo) : 0;
+      f += `,afade=t=out:st=${st}:d=${fo}`;
+    }
+    f += `[m${n}]`;
+    filters.push(f); labels.push(`[m${n}]`); valid++;
+  }
+  if (!valid) return null;
+  if (valid === 1) filters.push(`${labels[0]}loudnorm=I=-13.5:TP=-0.3:LRA=11,aresample=48000[a]`);
+  else filters.push(`${labels.join('')}amix=inputs=${valid}:normalize=0,loudnorm=I=-13.5:TP=-0.3:LRA=11,aresample=48000[a]`);
+  const args = inputs.concat(['-filter_complex', filters.join(';'), '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-t', String(videoDur), '-movflags', '+faststart', out]);
+  await new Promise((resolve, reject) => {
+    execFile('ffmpeg', args, { timeout: 300000, maxBuffer: 1e7 }, (err) => err ? reject(err) : resolve());
+  });
+  return out;
+}
+
 async function stopRecording(sessionId, auto) {
   if (!rec.active || rec.sessionId !== sessionId) return { ok: false, error: 'sin sesión activa' };
   clearInterval(rec.heartbeat);
@@ -350,22 +478,33 @@ async function stopRecording(sessionId, auto) {
   if (times.length < 2) { fs.rmSync(dir, { recursive: true, force: true }); return { ok: false, error: 'muy pocos frames capturados' }; }
   times.sort((a, b) => a.ts - b.ts);
   const elapsedSec = Math.max(0.5, (Date.now() - startedAt) / 1000);
+  const startWall = startedAt / 1000;
   const fps = Math.min(120, Math.max(1, times.length / elapsedSec)); // fps real promedio
-  const out = path.join(os.tmpdir(), `${project}-${Date.now()}.mp4`);
+  const out0 = path.join(os.tmpdir(), `${project}-${Date.now()}.mp4`);
   await new Promise((resolve, reject) => {
     const ff = execFile('ffmpeg', [
       '-y', '-f', 'image2pipe', '-framerate', String(fps),
       '-i', 'pipe:0',
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-      '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out
-    ], { timeout: 180000, maxBuffer: 1e7 }, (err) => (err ? reject(err) : resolve()));
+      '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out0
+    ], { timeout: 180000, maxBuffer: 1e7 }, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
     // difusión de error: cada frame se repite según su duración real (0 = se descarta)
+    // la línea de tiempo cubre TODO el elapsed: primer frame desde t=0, último hasta stop
     let acc = 0;
     let idx = 0;
     const writeFrame = () => {
       if (idx >= times.length) { ff.stdin.end(); return; }
       const t = times[idx];
-      const dur = idx === times.length - 1 ? 0.2 : Math.min(5, times[idx + 1].ts - t.ts);
+      const rel = t.ts - startWall; // segundos desde que arrancó la grabación
+      let dur;
+      // duraciones CRUDAS (sin clamp mínimo: a 30fps los gaps son 0.033s y un
+      // clamp a 0.05 infla la duración +50%; los dups=0 los descarta la difusión)
+      if (idx === 0) dur = Math.min(10, times[1].ts - startWall);                  // cubre desde t=0
+      else if (idx === times.length - 1) dur = Math.min(10, Math.max(0, elapsedSec - rel)); // hasta el stop
+      else dur = Math.min(5, Math.max(0, times[idx + 1].ts - t.ts));
       const dups = Math.floor(acc + dur * fps);
       acc = acc + dur * fps - dups;
       idx++;
@@ -388,8 +527,19 @@ async function stopRecording(sessionId, auto) {
     writeFrame();
   });
   fs.rmSync(dir, { recursive: true, force: true });
+  // 🎵 mezclar pistas de audio declaradas en project.json
+  let out = out0;
+  let audioInfo = { tracks: 0, mixed: false };
+  try {
+    const meta = readJson(path.join(projectDir(project), 'project.json')) || {};
+    const tracks = (meta.audio || []).filter(t => t && t.file);
+    if (tracks.length) {
+      const mixed = await muxAudio(out, tracks, projectDir(project));
+      if (mixed) { audioInfo = { tracks: tracks.length, mixed: true }; fs.rmSync(out, { force: true }); out = mixed; }
+    }
+  } catch (e) { console.error('[rec] mux audio:', e.message); }
   const avgFps = Math.round(fps * 10) / 10;
-  return { ok: true, file: out, fps: avgFps, frames: times.length, project };
+  return { ok: true, file: out, fps: avgFps, frames: times.length, project, audio: audioInfo };
 }
 
 app.post('/api/projects/:name/record/stop', async (req, res) => {
@@ -407,6 +557,7 @@ app.post('/api/projects/:name/record/stop', async (req, res) => {
     res.setHeader('X-Media-Url', publicUrl);
     res.setHeader('X-Media-Frames', String(r.frames));
     res.setHeader('X-Media-Fps', String(r.fps));
+    res.setHeader('X-Media-Audio', r.audio?.mixed ? `${r.audio.tracks} pistas mezcladas` : 'sin audio');
     res.attachment(`${r.project}.mp4`);
     fs.createReadStream(r.file).pipe(res).on('finish', () => fs.unlink(r.file, () => {}));
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }

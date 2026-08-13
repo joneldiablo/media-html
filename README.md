@@ -60,6 +60,7 @@ projects/mi-proyecto/
 | `POST /api/projects` | Crea proyecto (slugify + clamps width/height/fps/duration) |
 | `GET /api/projects/:name` | Detalle + lista de archivos |
 | `GET/PUT/POST /api/projects/:name/file?path=` | Leer / guardar / crear archivo (anti path-traversal) |
+| `POST /api/projects/:name/upload?path=` | **Upload binario** (audio/video/imagen, body crudo, máx 100MB) |
 | `POST /api/projects/:name/capture` | PNG en `at` segundos (headless-shell + `--virtual-time-budget`) |
 | `GET /api/projects/:name/download` | ZIP del proyecto |
 | `POST /api/projects/:name/record/{start,click,key,stop,abort}` | Grabadora (abajo) |
@@ -85,9 +86,45 @@ Frames a **disco** (tmp, no RAM): `media-rec-*/f<seq>.jpg`. ⚠️ Grabación de
 - ✅ Fix: `-f image2pipe -framerate <fps-real-promedio>` + **duplicación por difusión de error**: cada frame se repite `floor(acc + dur*fps)` veces (`acc` acumula el residuo). El ritmo real de los clicks queda fiel al segundo. Frames con 0 dups se descartan.
 - El `fps` real = frames capturados / segundos transcurridos (los 24/30 config del proyecto son irrelevantes para grabar).
 
+### Respuesta de `record/start`
+
+Antes de arrancar la captura, si el proyecto tiene `<video>` embebido se **fuerza la descarga completa** (seek al final y regreso) para que corra fluido durante la grabación. La respuesta incluye:
+
+```json
+{ "ok": true, "sessionId": "...", "prepared": { "videos": 1, "buffered": true, "durations": [8] } }
+```
+
+`buffered: false` (o `timeout: true`) = el video no terminó de descargar pero la grabación continúa (el admin lo muestra como ⚠️ parcial).
+
 ### Respuesta de `record/stop`
 
-- El MP4 se descarga directo + **copia pública** en `/mnt/480ssd/public-files/videos/media-html/` (URL en header `X-Media-Url`, frames en `X-Media-Frames`, fps real en `X-Media-Fps`).
+- El MP4 se descarga directo + **copia pública** en `/mnt/480ssd/public-files/videos/media-html/` (URL en header `X-Media-Url`, frames en `X-Media-Frames`, fps real en `X-Media-Fps`, mix de audio en `X-Media-Audio`).
+
+---
+
+## 🎵 Audio (pistas declarativas)
+
+`project.json` puede declarar pistas que se mezclan **al codificar** (mux determinista por ffmpeg — el navegador ni se entera):
+
+```json
+"audio": [
+  { "file": "musica.mp3", "at": 0,     "volume": 0.35, "fadeIn": 0.5, "fadeOut": 1.5 },
+  { "file": "voz-slide1.mp3", "at": 2.5, "volume": 1 }
+]
+```
+
+| Campo | Qué hace |
+|---|---|
+| `file` | Ruta relativa al proyecto (mp3/wav/ogg…) — subir con ⬆ en el editor o `POST /upload` |
+| `at` | Segundo (decimal) donde empieza la pista (`adelay`) |
+| `volume` | Ganancia (1 = normal) |
+| `fadeIn` / `fadeOut` | Fundidos en segundos (`afade`) |
+
+El mix final: `aresample → volume → adelay → fades → amix(normalize=0) → loudnorm(I=-13.5, TP=-0.3) → aac 192k`. El video se corta con `-t` a su duración exacta (las pistas más largas se recortan).
+
+**UI:** el panel del editor tiene la sección "🎵 Audio del video" — lista pistas, permite añadir/borrar/editar (`archivo, at, vol, fadeIn, fadeOut`) y guarda directo en `project.json`. Para subir los archivos: botón ⬆ Subir.
+
+⚠️ El audio de un `<video>` embebido **NO se captura** (la grabadora va con `--mute-audio` y el servidor no tiene audio). Si el clip tiene sonido, súbelo como pista con el `at` correspondiente.
 
 ---
 
@@ -109,6 +146,8 @@ Frames a **disco** (tmp, no RAM): `media-rec-*/f<seq>.jpg`. ⚠️ Grabación de
 8. **Selector `.fa` de Font Awesome 6:** matchea solo el literal `fa`; los iconos se usan como `<i class="fa-solid fa-rocket">`. Para estilarlos: `.fa-solid { font-size: ... }`.
 9. **Auth:** si `MEDIA_HTML_API_KEY` está vacía, los writes no piden llave (útil en dev, inseguro en prod).
 10. **QA visual:** para ver frames sin API de visión, usar análisis de píxeles (ffmpeg → rawvideo rgb24 → contar píxeles por color esperado) o `ollama run gemma4:e2b-ctx128` local (ojo: `OLLAMA_HOST` puede apuntar a una IP rara del sandbox; forzar `OLLAMA_HOST=http://localhost:11434`).
+11. **Duración = tiempo real (fix 2026-08-13):** la línea de tiempo de la difusión de error debe cubrir TODO el elapsed: el primer frame cubre `0 → times[1]` (si no, se pierde el primer segundo en páginas estáticas) y el último cubre hasta el stop. **NO usar clamp mínimo en los gaps** (a 30fps los gaps son 0.033s y un clamp a 0.05 infla la duración +50%). La difusión de error ya descarta los `dups=0`.
+12. **Timestamps unificados en wall-clock:** el screencast CDP trae `metadata.timestamp` en reloj monotónico — convertirlo a `Date.now()/1000` para poder mezclarlo con el heartbeat y anclar a `startedAt`. Además, el `page.screenshot` del heartbeat ensucia el compositor y dispara un screencast 30ms después (pares heartbeat+screencast con el mismo contenido — los duplicados se descartan solos).
 
 ---
 
@@ -148,3 +187,6 @@ Los proyectos de usuario NO se versionan (ver `.gitignore`); estos dos quedan co
 - [ ] PIN/expiración para la API key si algún día se expone a internet sin auth
 - [ ] Botón "generar MP4" programático (render de duración fija sin interacción)
 - [ ] QA automático de frames tras cada grabación (pixel-check por colores esperados)
+- [ ] Efectos de audio disparados por clicks (evento `media:audio` del bridge → `adelay` en el mix)
+- [ ] Voz en vivo con MediaRecorder (mic del navegador del admin → mux al stop)
+- [ ] UI de timeline: reproducir el video grabado y marcar los segundos de cada pista con un botón

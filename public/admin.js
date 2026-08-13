@@ -51,6 +51,7 @@ async function openProject(name) {
   $('#status').textContent = `${project.name} · ${project.width}×${project.height}px · ${project.fps}fps · ${project.duration}s`;
   fit();
   loadFiles();
+  loadAudio();
 }
 
 /* ---------- escala ---------- */
@@ -110,18 +111,24 @@ let recState = null, recTimerInt = null, recStart = 0;
 
 $('#btnRec').addEventListener('click', async () => {
   if (!recState) {
+    $('#btnRec').textContent = '⏳ preparando…';
+    $('#btnRec').disabled = true;
     try {
       const r = await api(`/api/projects/${state.current}/record/start`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
       });
       recState = await r.json();
+      recState._prep = recState.prepared && recState.prepared.videos
+        ? ` · video embebido ${recState.prepared.buffered ? 'listo ✓' : 'parcial ⚠️'} (${recState.prepared.videos})`
+        : '';
       recStart = Date.now();
       $('#btnRec').textContent = '⏹ Stop';
       $('#btnRec').classList.add('danger', 'recording');
       recTimerInt = setInterval(() => {
-        $('#status').textContent = `● GRABANDO ${state.current} · ${Math.round((Date.now() - recStart) / 1000)}s · ${recState.fps}fps · clicks y teclas se graban`;
+        $('#status').textContent = `● GRABANDO ${state.current} · ${Math.round((Date.now() - recStart) / 1000)}s${recState._prep} · clicks y teclas se graban`;
       }, 500);
     } catch (e) { alert('no pude iniciar grabación: ' + e.message); }
+    $('#btnRec').disabled = false;
   } else {
     clearInterval(recTimerInt);
     $('#btnRec').textContent = '⏳…';
@@ -203,6 +210,105 @@ $('#btnSave').addEventListener('click', async () => {
     body: JSON.stringify({ content: $('#fileContent').value })
   });
   $('#fileStatus').textContent = '💾 guardado ' + new Date().toLocaleTimeString();
+});
+
+/* ---------- upload binario (audio/video/imágenes) ---------- */
+
+$('#btnUpload').addEventListener('click', async () => {
+  const inp = $('#fileUpload');
+  const f = inp.files[0];
+  if (!f) return;
+  $('#fileStatus').textContent = `⬆ subiendo ${f.name}…`;
+  try {
+    const r = await fetch(`/api/projects/${state.current}/upload?path=${encodeURIComponent(f.name)}`, {
+      method: 'POST', headers: keyHdr(), body: f
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'upload falló');
+    $('#fileStatus').textContent = `✅ ${f.name} subido`;
+    inp.value = '';
+    await loadFiles();
+    loadAudio();
+  } catch (e) { alert('upload falló: ' + e.message); }
+});
+
+/* ---------- audio del video (pistas de project.json) ---------- */
+
+let audioFiles = [];
+
+async function loadAudio() {
+  const files = (await (await api(`/api/projects/${state.current}/files`)).json()).files;
+  audioFiles = files.filter(f => /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(f));
+  let meta = {};
+  try { meta = JSON.parse((await (await api(`/api/projects/${state.current}/file?path=${encodeURIComponent('project.json')}`)).json()).content); } catch {}
+  const tracks = Array.isArray(meta.audio) ? meta.audio : [];
+  $('#audioRows').innerHTML = '';
+  if (!tracks.length) $('#audioRows').innerHTML = '<div class="audio-empty">sin pistas — añade música/voz (mp3/wav/ogg)</div>';
+  tracks.forEach((t, i) => $('#audioRows').appendChild(audioRow(t, i)));
+}
+
+function audioRow(t, i) {
+  const row = document.createElement('div');
+  row.className = 'audio-row';
+  const sel = document.createElement('select');
+  sel.id = 'aFile' + i;
+  const opts = audioFiles.length ? audioFiles : [t.file || ''];
+  for (const f of opts) {
+    const o = document.createElement('option');
+    o.value = f; o.textContent = f;
+    if (f === t.file) o.selected = true;
+    sel.appendChild(o);
+  }
+  if (audioFiles.length) {
+    const o = document.createElement('option');
+    o.value = t.file || ''; o.textContent = t.file || '(archivo no encontrado)';
+    if (!audioFiles.includes(t.file)) o.selected = true;
+    sel.appendChild(o);
+  }
+  const num = (name, val, ph) => {
+    const inp = document.createElement('input');
+    inp.type = 'number'; inp.step = '0.1'; inp.min = '0';
+    inp.value = val ?? ''; inp.placeholder = ph;
+    inp.className = 'a-' + name; inp.id = 'a' + name + i;
+    return inp;
+  };
+  const at = num('at', t.at, 's');
+  at.title = 'segundo donde empieza';
+  const vol = num('vol', t.volume, 'vol');
+  vol.title = 'volumen (1 = normal)';
+  const fi = num('fi', t.fadeIn, 'fadeIn');
+  const fo = num('fo', t.fadeOut, 'fadeOut');
+  const del = document.createElement('button');
+  del.className = 'btn small danger';
+  del.textContent = '✕';
+  del.addEventListener('click', () => row.remove());
+  row.append(sel, at, vol, fi, fo, del);
+  return row;
+}
+
+$('#btnAudioAdd').addEventListener('click', () => {
+  $('#audioRows').querySelector('.audio-empty')?.remove();
+  $('#audioRows').appendChild(audioRow({ file: audioFiles[0] || '', at: 0, volume: 1 }, $('#audioRows').children.length));
+});
+
+$('#btnAudioSave').addEventListener('click', async () => {
+  try {
+    const { content } = await (await api(`/api/projects/${state.current}/file?path=${encodeURIComponent('project.json')}`)).json();
+    const meta = JSON.parse(content);
+    const tracks = [...$('#audioRows').children].map(row => ({
+      file: row.querySelector('select').value,
+      at: +row.querySelector('.a-at').value || 0,
+      volume: +row.querySelector('.a-vol').value || 1,
+      fadeIn: +row.querySelector('.a-fi').value || 0,
+      fadeOut: +row.querySelector('.a-fo').value || 0
+    })).filter(t => t.file);
+    meta.audio = tracks;
+    await api(`/api/projects/${state.current}/file?path=${encodeURIComponent('project.json')}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: JSON.stringify(meta, null, 2) })
+    });
+    $('#audioStatus').textContent = '💾 audio guardado ' + new Date().toLocaleTimeString();
+    loadAudio();
+  } catch (e) { alert('no pude guardar audio: ' + e.message); }
 });
 
 $('#newFileForm').addEventListener('submit', async (e) => {
