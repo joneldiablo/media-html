@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🎬 media-html</title>
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+<header>
+  <div class="brand">🎬 media-html</div>
+  <div class="controls">
+    <select id="projectSelect" title="Proyecto"></select>
+    <button id="btnPlay" class="btn primary" disabled>▶ Play</button>
+    <button id="btnRec" class="btn" disabled>● Grabar</button>
+    <div class="cap-group">
+      <input id="capAt" type="number" min="0" step="1" value="0" title="segundo de la animación a capturar">
+      <button id="btnCapture" class="btn" disabled>📸 Capturar</button>
+    </div>
+    <button id="btnDownload" class="btn" disabled>⬇ Descargar</button>
+    <button id="btnNew" class="btn">＋ Nuevo</button>
+    <button id="btnEditor" class="btn ghost">✎ Editor</button>
+  </div>
+</header>
+
+<main>
+  <div id="stage">
+    <div id="frameWrap"><iframe id="frame"></iframe></div>
+  </div>
+</main>
+
+<aside id="editor" class="hidden">
+  <div class="ed-head">
+    <span>Archivos</span>
+    <form id="newFileForm"><input id="newFileName" placeholder="nuevo.html"><button class="btn small">＋</button></form>
+  </div>
+  <ul id="fileList"></ul>
+  <textarea id="fileContent" spellcheck="false" placeholder="selecciona un archivo…"></textarea>
+  <div class="ed-foot">
+    <span id="fileStatus"></span>
+    <button id="btnSave" class="btn primary small" disabled>💾 Guardar</button>
+  </div>
+</aside>
+
+<footer>
+  <span id="status">cargando…</span>
+  <span id="scaleInfo"></span>
+</footer>
+
+<div id="modal" class="hidden">
+  <form id="newForm">
+    <h3>Nuevo proyecto</h3>
+    <label>Nombre <input id="npName" required placeholder="mi-proyecto"></label>
+    <div class="row">
+      <label>Ancho <input id="npW" type="number" value="1920" min="16" max="7680"></label>
+      <label>Alto <input id="npH" type="number" value="1080" min="16" max="4320"></label>
+    </div>
+    <div class="row">
+      <label>FPS <input id="npFps" type="number" value="30" min="1" max="120"></label>
+      <label>Duración (s) <input id="npDur" type="number" value="10" min="1" max="3600"></label>
+    </div>
+    <div class="actions">
+      <button type="button" id="npCancel" class="btn">Cancelar</button>
+      <button type="submit" class="btn primary">Crear</button>
+    </div>
+  </form>
+</div>
+
+<script src="admin.js"></script>
+</body>
+</html>

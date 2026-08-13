@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>presentacion-demo — media-html</title>
+<style>
+  * { margin: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: system-ui, sans-serif; color: #fff;
+    background:
+      radial-gradient(1100px 600px at 12% 10%, rgba(168,85,247,.45), transparent 60%),
+      radial-gradient(900px 550px at 88% 92%, rgba(14,165,233,.4), transparent 60%),
+      #0a0d14;
+    position: relative;
+  }
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 6rem;
+    opacity: 0; transform: translateY(28px);
+    transition: opacity .5s ease, transform .5s ease;
+    pointer-events: none;
+  }
+  .slide.active { opacity: 1; transform: none; pointer-events: auto; }
+  .kicker { font-size: 1.3rem; letter-spacing: .35em; text-transform: uppercase; opacity: .55; margin-bottom: 1rem; }
+  h1 { font-size: 5rem; line-height: 1.05; letter-spacing: .01em;
+    background: linear-gradient(90deg, #e9d5ff, #7dd3fc);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { margin-top: 1.4rem; font-size: 1.7rem; opacity: .8; max-width: 1100px; }
+  .hint { position: absolute; bottom: 7rem; left: 0; right: 0; font-size: 1.15rem; opacity: .45; }
+  .cards { display: flex; gap: 2.5rem; margin-top: 3rem; }
+  .card {
+    width: 340px; padding: 2.2rem 1.8rem; border-radius: 1.4rem;
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.05); backdrop-filter: blur(8px);
+    animation: floaty 4s ease-in-out infinite;
+  }
+  .card:nth-child(2) { animation-delay: .5s; }
+  .card:nth-child(3) { animation-delay: 1s; }
+  .card .icon { font-size: 2.6rem; }
+  .card h3 { margin: .8rem 0 .5rem; font-size: 1.4rem; }
+  .card p { font-size: 1.05rem; opacity: .7; line-height: 1.5; }
+  @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+  .big-emoji { font-size: 6rem; animation: floaty 3s ease-in-out infinite; }
+  .progress { position: absolute; top: 0; left: 0; height: 6px; width: 100%; background: rgba(255,255,255,.08); }
+  #bar { height: 100%; width: 0; background: linear-gradient(90deg, #a855f7, #0ea5e9); transition: width .35s ease; }
+</style>
+</head>
+<body>
+  <div class="progress"><div id="bar"></div></div>
+
+  <section class="slide active" id="s0">
+    <div class="kicker">media-html</div>
+    <h1>Presentaciones con clicks</h1>
+    <p class="sub">Tu sitio web dispara acciones con cada clic — y al final, Stop graba el video.</p>
+    <p class="hint">👆 clic derecho de la pantalla = siguiente · izquierdo = anterior (o flechas)</p>
+  </section>
+
+  <section class="slide" id="s1">
+    <div class="kicker">así funciona</div>
+    <h1>Tres pasos</h1>
+    <div class="cards">
+      <div class="card"><div class="icon">🖱️</div><h3>Haz clic</h3><p>Navega la presentación en vivo, con tus animaciones CSS y JS.</p></div>
+      <div class="card"><div class="icon">⏺️</div><h3>Grabando</h3><p>Cada clic y tecla se reenvía al navegador oculto que captura frames.</p></div>
+      <div class="card"><div class="icon">🎞️</div><h3>Stop</h3><p>ffmpeg arma el MP4 en 1920×1080 y lo deja listo para descargar.</p></div>
+    </div>
+    <p class="hint">👆 clic derecho de la pantalla = siguiente · izquierdo = anterior</p>
+  </section>
+
+  <section class="slide" id="s2">
+    <div class="big-emoji">🎬</div>
+    <h1>¡Eso es todo!</h1>
+    <p class="sub">Dale Stop cuando termines — el video sale al instante.</p>
+    <p class="hint">👆 un clic más para volver al inicio</p>
+  </section>
+
+  <script>
+    var idx = 0;
+    var slides = document.querySelectorAll('.slide');
+    function go(n) {
+      idx = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach(function (s, i) { s.classList.toggle('active', i === idx); });
+      document.getElementById('bar').style.width = ((idx + 1) / slides.length * 100) + '%';
+    }
+    document.addEventListener('click', function (e) {
+      if (e.clientX > window.innerWidth / 2) go(idx + 1); else go(idx - 1);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') go(idx + 1);
+      if (e.key === 'ArrowLeft') go(idx - 1);
+    });
+    go(0);
+  </script>
+  <script src="../bridge.js"></script>
+</body>
+</html>

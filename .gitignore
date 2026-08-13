@@ -1,0 +1,17 @@
+# dependencias
+node_modules/
+
+# secretos / config local
+.env
+
+# proyectos de usuario (los ejemplos quedan versionados)
+projects/*
+!projects/bridge.js
+!projects/demo/
+!projects/demo/*
+!projects/presentacion-demo/
+!projects/presentacion-demo/*
+
+# logs / temporales
+*.log
+npm-debug.log*
