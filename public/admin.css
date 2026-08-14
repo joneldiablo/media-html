@@ -39,8 +39,6 @@ select{ min-width:180px; }
 }
 .btn.ghost{ background:transparent; }
 .btn.small{ padding:5px 10px; font-size:.8rem; }
-.cap-group{ display:flex; gap:6px; align-items:center; }
-#capAt{ width:64px; }
 main{
   flex:1; position:relative; overflow:hidden;
   background:
@@ -88,7 +86,6 @@ footer{
 #loginModal input{ padding:.45rem .6rem; border-radius:8px; border:1px solid var(--border,#2a3240); background:#0d1117; color:var(--fg,#e6e9ef); font-size:.95rem; }
 .login-hint{ margin:0; font-size:.8rem; color:var(--dim,#9aa4b2); }
 .login-error{ font-size:.8rem; color:#f87171; min-height:1em; }
-.cap-label{ font-size:.75rem; color:var(--dim,#9aa4b2); }
 #newForm{
   background:var(--panel); border:1px solid var(--border); border-radius:14px;
   padding:22px 26px; width:340px; display:flex; flex-direction:column; gap:12px;

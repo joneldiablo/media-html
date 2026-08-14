@@ -91,6 +91,7 @@ async function openProject(name) {
   const { project } = await (await api(`/api/projects/${name}`)).json();
   state.current = name;
   state.playing = false;
+  animTime = 0; playStartedAt = null;
   $('#btnPlay').textContent = '▶ Play';
   frame.src = `/projects/${name}/index.html?media=1`;
   frame.dataset.w = project.width;
@@ -175,8 +176,21 @@ window.addEventListener('resize', fit);
 
 /* ---------- play / pausa ---------- */
 
+// reloj de la animación: acumula segundos reproducidos para que la captura
+// tome el PNG justo donde está la pausa (sin input manual de segundos)
+let animTime = 0, playStartedAt = null;
+
+function currentAnimTime() {
+  return animTime + (state.playing && playStartedAt !== null ? (performance.now() - playStartedAt) / 1000 : 0);
+}
+
 $('#btnPlay').addEventListener('click', () => {
   state.playing = !state.playing;
+  if (state.playing) playStartedAt = performance.now();
+  else {
+    if (playStartedAt !== null) animTime += (performance.now() - playStartedAt) / 1000;
+    playStartedAt = null;
+  }
   frame.contentWindow.postMessage({ type: 'media:' + (state.playing ? 'play' : 'pause') }, '*');
   $('#btnPlay').textContent = state.playing ? '⏸ Pausa' : '▶ Play';
 });
@@ -184,7 +198,7 @@ $('#btnPlay').addEventListener('click', () => {
 /* ---------- captura ---------- */
 
 $('#btnCapture').addEventListener('click', async () => {
-  const at = Math.max(0, +($('#capAt').value || 0));
+  const at = Math.max(0, Math.round(currentAnimTime() * 10) / 10);
   $('#btnCapture').textContent = '⏳…';
   try {
     const r = await api(`/api/projects/${state.current}/capture`, {
@@ -227,19 +241,22 @@ $('#btnRec').addEventListener('click', async () => {
       recStart = Date.now();
       $('#btnRec').textContent = '⏹ Stop';
       $('#btnRec').classList.add('danger', 'recording');
+      $('#btnRec').disabled = false; // sigue clickeable para el Stop
       recTimerInt = setInterval(() => {
         $('#status').textContent = `● GRABANDO ${state.current} · ${Math.round((Date.now() - recStart) / 1000)}s${recState._prep} · clicks y teclas se graban`;
       }, 500);
-    } catch (e) { alert('no pude iniciar grabación: ' + e.message); }
-    $('#btnRec').textContent = '● Grabar';
-    $('#btnRec').classList.remove('danger', 'recording');
-    $('#btnRec').disabled = false;
+    } catch (e) {
+      alert('no pude iniciar grabación: ' + e.message);
+      $('#btnRec').textContent = '● Grabar';
+      $('#btnRec').classList.remove('danger', 'recording');
+      $('#btnRec').disabled = false;
+    }
   } else {
     clearInterval(recTimerInt);
     $('#btnRec').textContent = '⏳…';
     try {
-      const r = await fetch(`/api/projects/${state.current}/record/stop`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...keyHdr() },
+      const r = await api(`/api/projects/${state.current}/record/stop`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: recState.sessionId })
       });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'stop falló');
@@ -325,8 +342,8 @@ $('#btnUpload').addEventListener('click', async () => {
   if (!f) return;
   $('#fileStatus').textContent = `⬆ subiendo ${f.name}…`;
   try {
-    const r = await fetch(`/api/projects/${state.current}/upload?path=${encodeURIComponent(f.name)}`, {
-      method: 'POST', headers: keyHdr(), body: f
+    const r = await api(`/api/projects/${state.current}/upload?path=${encodeURIComponent(f.name)}`, {
+      method: 'POST', body: f
     });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'upload falló');
     $('#fileStatus').textContent = `✅ ${f.name} subido`;
@@ -436,13 +453,13 @@ window.addEventListener('message', (e) => {
   if (d.type === 'media:ready') fit();
   if (d.type === 'media:click' && recState) {
     fetch(`/api/projects/${state.current}/record/click`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...keyHdr() },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: recState.sessionId, x: d.x, y: d.y })
     }).catch(() => {});
   }
   if (d.type === 'media:key' && recState) {
     fetch(`/api/projects/${state.current}/record/key`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...keyHdr() },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: recState.sessionId, key: d.key })
     }).catch(() => {});
   }
