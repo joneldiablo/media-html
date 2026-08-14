@@ -80,6 +80,15 @@ footer{
 #status{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #modal{ position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:50; }
 #modal.hidden{ display:none; }
+#loginModal{ position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:60; }
+#loginModal.hidden{ display:none; }
+#loginModal form{ background:var(--bg2,#141a24); border:1px solid var(--border,#2a3240); border-radius:14px; padding:1.6rem 1.8rem; width:320px; display:flex; flex-direction:column; gap:.8rem; }
+#loginModal h3{ margin:0; }
+#loginModal label{ display:flex; flex-direction:column; gap:.3rem; font-size:.85rem; color:var(--dim,#9aa4b2); }
+#loginModal input{ padding:.45rem .6rem; border-radius:8px; border:1px solid var(--border,#2a3240); background:#0d1117; color:var(--fg,#e6e9ef); font-size:.95rem; }
+.login-hint{ margin:0; font-size:.8rem; color:var(--dim,#9aa4b2); }
+.login-error{ font-size:.8rem; color:#f87171; min-height:1em; }
+.cap-label{ font-size:.75rem; color:var(--dim,#9aa4b2); }
 #newForm{
   background:var(--panel); border:1px solid var(--border); border-radius:14px;
   padding:22px 26px; width:340px; display:flex; flex-direction:column; gap:12px;

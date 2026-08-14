@@ -115,16 +115,62 @@ app.use((req, res, next) => {
 });
 app.use(express.static(PUBLIC_DIR));
 
-/* ---------------- auth para escritura (API público) ---------------- */
+/* ---------------- auth: sesión (panel) o X-Media-Key (scripts) ---------------- */
 
-function requireKey(req, res, next) {
-  if (!API_KEY) return next();
-  if (req.headers['x-media-key'] === API_KEY) return next();
-  return res.status(401).json({ ok: false, error: 'API key requerida (header X-Media-Key)' });
+const ADMIN_USER = process.env.MEDIA_HTML_USER || '';
+const ADMIN_PASS = process.env.MEDIA_HTML_PASS || '';
+const SESSION_TTL = 12 * 3600 * 1000; // 12h
+const SESSIONS = new Map(); // token -> { user, expires }
+
+function getCookies(req) {
+  const out = {};
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > -1) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
 }
 
-app.post('/api/*', requireKey);
-app.put('/api/*', requireKey);
+function sessionCookie(token, maxAgeSec) {
+  return `media_session=${token}; HttpOnly; SameSite=Lax; Path=/${maxAgeSec ? `; Max-Age=${maxAgeSec}` : ''}`;
+}
+
+function requireAuth(req, res, next) {
+  // método para scripts backend-to-backend (sin cookie)
+  if (API_KEY && req.headers['x-media-key'] === API_KEY) return next();
+  // método del panel: cookie de sesión
+  const t = getCookies(req).media_session;
+  const s = t && SESSIONS.get(t);
+  if (s) {
+    if (s.expires > Date.now()) { s.expires = Date.now() + SESSION_TTL; return next(); }
+    SESSIONS.delete(t);
+  }
+  return res.status(401).json({ ok: false, error: 'sesión requerida' });
+}
+
+app.post('/api/login', (req, res) => {
+  const { user, password } = req.body || {};
+  if (!ADMIN_USER || !ADMIN_PASS) {
+    return res.status(500).json({ ok: false, error: 'login no configurado (MEDIA_HTML_USER/PASS en .env)' });
+  }
+  if (user === ADMIN_USER && password === ADMIN_PASS) {
+    const token = crypto.randomBytes(32).toString('hex');
+    SESSIONS.set(token, { user, expires: Date.now() + SESSION_TTL });
+    res.setHeader('Set-Cookie', sessionCookie(token, SESSION_TTL / 1000));
+    return res.json({ ok: true });
+  }
+  return res.status(401).json({ ok: false, error: 'usuario o contraseña incorrectos' });
+});
+
+app.post('/api/logout', (req, res) => {
+  const t = getCookies(req).media_session;
+  if (t) SESSIONS.delete(t);
+  res.setHeader('Set-Cookie', sessionCookie('', 0));
+  res.json({ ok: true });
+});
+
+// TODO el API queda detrás de auth (el preview iframe usa /projects, no /api)
+app.use('/api', requireAuth);
 
 /* ---------------- API: proyectos ---------------- */
 

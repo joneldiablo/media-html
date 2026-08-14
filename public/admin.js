@@ -7,36 +7,84 @@ const frame = $('#frame');
 const wrap = $('#frameWrap');
 const stage = $('#stage');
 
-/* ---------- api key (escrituras) ---------- */
-let mediaKey = localStorage.getItem('mhKey') || '';
-function keyHdr() { return mediaKey ? { 'X-Media-Key': mediaKey } : {}; }
+/* ---------- api (con login por sesión; la cookie viaja sola) ---------- */
 
 async function api(path, opts = {}) {
-  const headers = { ...(opts.headers || {}), ...keyHdr() };
-  let r = await fetch(path, { ...opts, headers });
+  let r = await fetch(path, { ...opts, headers: { ...(opts.headers || {}) } });
   if (r.status === 401 && !opts._retried) {
-    const k = prompt('🔑 API key de media-html:');
-    if (k) { localStorage.setItem('mhKey', k); mediaKey = k; return api(path, { ...opts, _retried: true }); }
+    await requestLogin(); // si cancela, lanza y el llamador hace catch
+    return api(path, { ...opts, _retried: true });
   }
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
   return r;
 }
 
+/* ---------- pantalla de login (sin prompt de token) ---------- */
+
+let loginModalPromise = null;
+function requestLogin() {
+  if (loginModalPromise) return loginModalPromise;
+  loginModalPromise = new Promise((resolve, reject) => {
+    const modal = $('#loginModal');
+    const errEl = $('#loginError');
+    errEl.textContent = '';
+    modal.classList.remove('hidden');
+    const cleanup = (ok) => {
+      modal.classList.add('hidden');
+      $('#loginForm').removeEventListener('submit', onSubmit);
+      $('#loginCancel').removeEventListener('click', onCancel);
+      $('#loginPass').value = '';
+      loginModalPromise = null;
+      ok ? resolve() : reject(new Error('inicia sesión para continuar'));
+    };
+    const onSubmit = async (e) => {
+      e.preventDefault();
+      errEl.textContent = '';
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user: $('#loginUser').value, password: $('#loginPass').value })
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          errEl.textContent = j.error || 'credenciales incorrectas';
+          return;
+        }
+        cleanup(true);
+      } catch { errEl.textContent = 'error de red, reintenta'; }
+    };
+    const onCancel = () => cleanup(false);
+    $('#loginForm').addEventListener('submit', onSubmit);
+    $('#loginCancel').addEventListener('click', onCancel);
+    setTimeout(() => $('#loginUser').focus(), 50);
+  });
+  return loginModalPromise;
+}
+
+$('#btnLogout').addEventListener('click', async () => {
+  try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+  location.reload();
+});
+
 /* ---------- proyectos ---------- */
 
 async function loadProjects(keep) {
-  const { projects } = await (await api('/api/projects')).json();
-  state.projects = projects;
-  select.innerHTML = '';
-  for (const p of projects) {
-    const o = document.createElement('option');
-    o.value = p.name;
-    o.textContent = `${p.name} · ${p.width}×${p.height}`;
-    select.appendChild(o);
+  try {
+    const { projects } = await (await api('/api/projects')).json();
+    state.projects = projects;
+    select.innerHTML = '';
+    for (const p of projects) {
+      const o = document.createElement('option');
+      o.value = p.name;
+      o.textContent = `${p.name} · ${p.width}×${p.height}`;
+      select.appendChild(o);
+    }
+    const target = keep || projects.find(p => p.name === state.current) || projects[projects.length - 1];
+    if (target) { select.value = target.name; await openProject(target.name); }
+    else $('#status').textContent = 'sin proyectos — crea uno con ＋ Nuevo';
+  } catch (e) {
+    $('#status').textContent = '🔒 ' + e.message;
   }
-  const target = keep || projects.find(p => p.name === state.current) || projects[projects.length - 1];
-  if (target) { select.value = target.name; await openProject(target.name); }
-  else $('#status').textContent = 'sin proyectos — crea uno con ＋ Nuevo';
 }
 
 async function openProject(name) {
@@ -139,8 +187,8 @@ $('#btnCapture').addEventListener('click', async () => {
   const at = Math.max(0, +($('#capAt').value || 0));
   $('#btnCapture').textContent = '⏳…';
   try {
-    const r = await fetch(`/api/projects/${state.current}/capture`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...keyHdr() },
+    const r = await api(`/api/projects/${state.current}/capture`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ at })
     });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'captura falló');
@@ -183,6 +231,8 @@ $('#btnRec').addEventListener('click', async () => {
         $('#status').textContent = `● GRABANDO ${state.current} · ${Math.round((Date.now() - recStart) / 1000)}s${recState._prep} · clicks y teclas se graban`;
       }, 500);
     } catch (e) { alert('no pude iniciar grabación: ' + e.message); }
+    $('#btnRec').textContent = '● Grabar';
+    $('#btnRec').classList.remove('danger', 'recording');
     $('#btnRec').disabled = false;
   } else {
     clearInterval(recTimerInt);

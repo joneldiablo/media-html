@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>🎬 media-html</title>
-<link rel="stylesheet" href="admin.css">
+<link rel="stylesheet" href="admin.css?v=2">
 </head>
 <body>
 <header>
@@ -14,12 +14,14 @@
     <button id="btnPlay" class="btn primary" disabled>▶ Play</button>
     <button id="btnRec" class="btn" disabled>● Grabar</button>
     <div class="cap-group">
+      <label class="cap-label" for="capAt" title="segundo de la animación en el que tomar el PNG (avanza la animación hasta ahí y captura)">seg</label>
       <input id="capAt" type="number" min="0" step="1" value="0" title="segundo de la animación a capturar">
       <button id="btnCapture" class="btn" disabled>📸 Capturar</button>
     </div>
     <button id="btnDownload" class="btn" disabled>⬇ Descargar</button>
     <button id="btnNew" class="btn">＋ Nuevo</button>
     <button id="btnEditor" class="btn ghost">✎ Editor</button>
+    <button id="btnLogout" class="btn ghost" title="cerrar sesión">🔒 Salir</button>
   </div>
 </header>
 
@@ -79,6 +81,20 @@
   </form>
 </div>
 
-<script src="admin.js?v=2"></script>
+<div id="loginModal" class="hidden">
+  <form id="loginForm">
+    <h3>🔐 Inicia sesión</h3>
+    <p class="login-hint">el panel de media-html es privado</p>
+    <label>Usuario <input id="loginUser" required autocomplete="username"></label>
+    <label>Contraseña <input id="loginPass" type="password" required autocomplete="current-password"></label>
+    <div id="loginError" class="login-error"></div>
+    <div class="actions">
+      <button type="button" id="loginCancel" class="btn">Cancelar</button>
+      <button type="submit" class="btn primary">Entrar</button>
+    </div>
+  </form>
+</div>
+
+<script src="admin.js?v=3"></script>
 </body>
 </html>
