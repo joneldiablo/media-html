@@ -104,6 +104,15 @@ function listProjects() {
 /* ---------------- estáticos ---------------- */
 
 app.use('/projects', express.static(PROJECTS_DIR));
+// ⚠️ el panel NO debe cachearse en el navegador (Cloudflare impone 4h de
+// browser-cache por zona; si algún día se pone 'respect origin', esto ya
+// manda no-cache y los cambios de admin.js se ven al instante).
+app.use((req, res, next) => {
+  if (req.path === '/' || /^\/(index\.html|admin\.js|admin\.css)$/.test(req.path)) {
+    res.setHeader('Cache-Control', 'no-cache');
+  }
+  next();
+});
 app.use(express.static(PUBLIC_DIR));
 
 /* ---------------- auth para escritura (API público) ---------------- */
