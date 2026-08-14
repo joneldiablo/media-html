@@ -47,11 +47,66 @@ async function openProject(name) {
   frame.src = `/projects/${name}/index.html?media=1`;
   frame.dataset.w = project.width;
   frame.dataset.h = project.height;
-  ['btnPlay', 'btnCapture', 'btnDownload', 'btnRec'].forEach(id => $(id).disabled = false);
-  $('#status').textContent = `${project.name} · ${project.width}×${project.height}px · ${project.fps}fps · ${project.duration}s`;
+  // 🎬 candado de video: si el proyecto trae <video>, los botones se habilitan
+  // SOLO cuando los videos estén buffereados (grabación fluida).
+  // Si NO hay <video>, se habilitan de inmediato.
+  const prep = await armButtons();
+  $('#status').textContent = `${project.name} · ${project.width}×${project.height}px · ${project.fps}fps · ${project.duration}s${prep}`;
   fit();
   loadFiles();
   loadAudio();
+}
+
+/* ---------- candado de video embebido ---------- */
+
+function setButtonsEnabled(on) {
+  ['btnPlay', 'btnCapture', 'btnDownload', 'btnRec'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !on;
+  });
+}
+
+async function armButtons() {
+  // esperar a que el iframe cargue el proyecto
+  const projectUrl = `/projects/${state.current}/index.html`;
+  const isLoaded = () => {
+    try {
+      const d = frame.contentDocument;
+      return d && d.URL && d.URL.includes(projectUrl) && d.readyState === 'complete';
+    } catch { return false; }
+  };
+  if (!isLoaded()) {
+    await new Promise(res => {
+      frame.addEventListener('load', res, { once: true });
+      setTimeout(res, 10000); // fallback: nunca colgar el panel
+    });
+  }
+  let videos = [];
+  try {
+    const d = frame.contentDocument;
+    if (d) videos = [...d.querySelectorAll('video')];
+  } catch { videos = []; }
+  // sin <video> → todo activo ya
+  if (!videos.length) { setButtonsEnabled(true); return ''; }
+  // candado: forzar carga y esperar buffer completo (máx 45s, como el server)
+  for (const v of videos) {
+    if (v.preload === 'none') v.preload = 'auto';
+    if (v.readyState < 1) { try { v.load(); } catch {} }
+  }
+  const buffered = () => videos.every(v =>
+    v.readyState === 4 ||
+    (v.buffered.length && Number.isFinite(v.duration) && v.duration > 0 &&
+     v.buffered.end(v.buffered.length - 1) >= v.duration - 0.3));
+  if (buffered()) { setButtonsEnabled(true); return ` · video embebido listo ✓ (${videos.length})`; }
+  $('#status').textContent = `⏳ cargando ${videos.length} video(s) embebido(s)…`;
+  const deadline = Date.now() + 45000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 500));
+    if (buffered()) { setButtonsEnabled(true); return ` · video embebido listo ✓ (${videos.length})`; }
+  }
+  // si los videos no terminan, habilitar igual (el server fuerza el buffer al grabar)
+  setButtonsEnabled(true);
+  return ` · video embebido parcial ⚠️ (${videos.length})`;
 }
 
 /* ---------- escala ---------- */
