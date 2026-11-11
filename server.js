@@ -96,7 +96,9 @@ function listProjects() {
       const meta = readJson(path.join(dir, 'project.json')) || {};
       let st = { mtimeMs: 0 };
       try { st = fs.statSync(dir); } catch {}
-      return { name: d.name, ...meta, updatedAt: st.mtimeMs };
+      // name = carpeta (slug, es lo que usan las URLs/API);
+      // title = nombre amigable del project.json (si existe)
+      return { name: d.name, title: meta.name || d.name, ...meta, name: d.name, updatedAt: st.mtimeMs };
     })
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }

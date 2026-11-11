@@ -76,7 +76,7 @@ async function loadProjects(keep) {
     for (const p of projects) {
       const o = document.createElement('option');
       o.value = p.name;
-      o.textContent = `${p.name} · ${p.width}×${p.height}`;
+      o.textContent = `${p.title || p.name} · ${p.width}×${p.height}`;
       select.appendChild(o);
     }
     const target = keep || projects.find(p => p.name === state.current) || projects[projects.length - 1];
@@ -281,6 +281,15 @@ $('#btnRec').addEventListener('click', async () => {
 const modal = $('#modal');
 $('#btnNew').addEventListener('click', () => modal.classList.remove('hidden'));
 $('#npCancel').addEventListener('click', () => modal.classList.add('hidden'));
+
+/* Selector de formato: al elegir preset, rellena Ancho/Alto */
+$('#npRatio').addEventListener('change', (e) => {
+  const opt = e.target.selectedOptions[0];
+  if (opt.dataset.w && opt.dataset.h) {
+    $('#npW').value = opt.dataset.w;
+    $('#npH').value = opt.dataset.h;
+  }
+});
 $('#newForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
